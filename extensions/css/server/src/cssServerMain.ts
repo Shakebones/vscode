@@ -17,7 +17,7 @@ import { DocumentColorRequest, ServerCapabilities as CPServerCapabilities, Color
 import { getCSSLanguageService, getSCSSLanguageService, getLESSLanguageService, LanguageSettings, LanguageService, Stylesheet, ICompletionParticipant } from 'vscode-css-languageservice';
 import { getLanguageModelCache } from './languageModelCache';
 import { formatError, runSafe } from './utils/errors';
-import { doComplete as emmetDoComplete, updateExtensionsPath as updateEmmetExtensionsPath, getEmmetCompletionParticipants } from 'vscode-emmet-helper';
+import { doComplete as emmetDoComplete, updateExtensionsPath as updateEmmetExtensionsPath, getEmmetCompletionParticipants, extractAbbreviation } from 'vscode-emmet-helper';
 import uri from 'vscode-uri';
 
 export interface Settings {
@@ -221,8 +221,18 @@ connection.onCompletion(textDocumentPosition => {
 		const emmetCompletionParticipant: ICompletionParticipant = getEmmetCompletionParticipants(document, textDocumentPosition.position, document.languageId, emmetSettings, emmetCompletionList);
 		getLanguageService(document).setCompletionParticipants([emmetCompletionParticipant]);
 
+		const stylesheet = stylesheets.get(document);
 		const result = getLanguageService(document).doComplete(document, textDocumentPosition.position, stylesheets.get(document))!; /* TODO: remove ! once LS has null annotations */
 		if (emmetCompletionList && emmetCompletionList.items) {
+			// Workaround for https://github.com/Microsoft/vscode-css-languageservice/issues/69
+			if (!emmetCompletionList.items.length
+				&& typeof stylesheet['end'] === 'number'
+				&& document.offsetAt(textDocumentPosition.position) > stylesheet['end']) {
+				const extractedResults = extractAbbreviation(document, textDocumentPosition.position, { lookAhead: false, syntax: 'css' });
+				if (extractedResults && /\.\d+$/.test(extractedResults.abbreviation)) {
+					emmetCompletionParticipant.onCssProperty({ propertyName: extractedResults.abbreviation, range: extractedResults.abbreviationRange });
+				}
+			}
 			cachedCompletionList = result;
 			if (emmetCompletionList.items.length && hexColorRegex.test(emmetCompletionList.items[0].label) && result.items.some(x => x.label === emmetCompletionList.items[0].label)) {
 				emmetCompletionList.items.shift();
